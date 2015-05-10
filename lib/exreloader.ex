@@ -1,38 +1,54 @@
-## 
+##
 ## Inspired by mochiweb's reloader (Copyright 2007 Mochi Media, Inc.)
 ##
 defmodule ExReloader do
-  use Application.Behaviour
-  alias GenX.Supervisor, as: Sup
+  use Application
+  import Supervisor.Spec
+  require Logger
 
   def start do
     :ok = Application.start :exreloader
   end
 
   def start(_, _) do
-    Sup.start_link sup_tree
+    interval = Application.get_all_env(:exreloader)[:interval] || 1000
+    children = [worker(ExReloader.Server, [interval])]
+    opts = [strategy: :one_for_one,
+            name: ExReloader.Server.Sup]
+    Supervisor.start_link(children, opts)
   end
-
-  defp sup_tree do
-    interval = Application.environment(:exreloader)[:interval] || 1000
-    Sup.OneForOne.new(id: ExReloader.Server.Sup,
-                      children: [Sup.Worker.new(id: ExReloader.Server, 
-                                                start_func: {ExReloader.Server, :start_link, [interval]})])
-  end  
 
   ##
 
   def reload_modules(modules) do
-    lc module inlist modules, do: reload(module)
+    for module <- modules, do: reload(module)
   end
 
   def reload(module) do
     :code.purge(module)
-    :code.load_file(module)   
+    :code.load_file(module)
+    Logger.info "Reloaded #{inspect module}"
+  end
+
+  def recompile module do
+    src = source(module)
+    {:file, beam} = :code.is_loaded(module)
+    path = :filename.dirname(beam)
+    Logger.info "Recompiling #{inspect module} in '#{src}' to '#{beam}'"
+    compile(:erlang.list_to_binary(src), :erlang.list_to_binary(path))
+  end
+
+  defp compile(src, path) when is_binary(src) and is_binary(path) do
+    Kernel.ParallelCompiler.files_to_path([src], path)
+  end
+
+  def source module do
+    info = module.module_info()
+    info[:compile][:source]
   end
 
   def all_changed() do
-    lc {m, f} inlist :code.all_loaded, is_list(f), changed?(m), do: m
+    for {m, f} <- :code.all_loaded, is_list(f), changed?(m), do: m
   end
 
   def changed?(module) do
@@ -56,24 +72,23 @@ defmodule ExReloader do
 end
 
 defmodule ExReloader.Server do
-  use GenServer.Behaviour
-  import GenX.GenServer
-  alias :gen_server, as: GenServer
+  use GenServer
+  require Logger
 
-  def start_link(interval // 1000) do
-    GenServer.start {:local, __MODULE__}, __MODULE__, interval, []
+  def start_link(interval \\ 1000) do
+    GenServer.start_link( __MODULE__, interval, [name: {:local, __MODULE__}])
   end
 
   def init(interval) do
-    {:ok, {timestamp, interval}, interval}
+    {:ok, {timestamp(), interval}, interval}
   end
 
-  defcall stop, state: state do
+  def handle_call :stop, state do
     {:stop, :shutdown, :stopped, state}
   end
 
-  definfo timeout, state: {last, timeout} do
-    now = timestamp
+  def handle_info :timeout, {last, timeout} do
+    now = timestamp()
     run(last, now)
     {:noreply, {now, timeout}, timeout}
   end
@@ -81,15 +96,16 @@ defmodule ExReloader.Server do
   defp timestamp, do: :erlang.localtime
 
   defp run(from, to) do
-    lc {module, filename} inlist :code.all_loaded, is_list(filename) do
-      case File.stat(filename) do
-        {:ok, File.Stat[mtime: mtime]} when mtime >= from and mtime < to ->
-           ExReloader.reload(module)
+    for {module, beam} <- :code.all_loaded, is_list(beam) do
+      src = ExReloader.source(module)
+      case File.stat(src) do
+        {:ok, %File.Stat{mtime: mtime}} when mtime >= from and mtime < to ->
+          ExReloader.recompile(module)
+          ExReloader.reload(module)
         {:ok, _} -> :unmodified
         {:error, :enoent} -> :gone
         other -> other
       end
     end
   end
-
 end

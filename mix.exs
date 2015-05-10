@@ -9,11 +9,11 @@ defmodule Exreloader.Mixfile do
 
   # Configuration for the OTP application
   def application do
-    [applications: [:genx],
+    [applications: [:logger],
      mod: {ExReloader, []}]
   end
 
   defp deps do
-    [{ :genx, github: "yrashk/genx" }]
+    []
   end
 end
