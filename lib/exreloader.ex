@@ -35,11 +35,40 @@ defmodule ExReloader do
     {:file, beam} = :code.is_loaded(module)
     path = :filename.dirname(beam)
     Logger.info "Recompiling #{inspect module} in '#{src}'"
-    compile(:erlang.list_to_binary(src), :erlang.list_to_binary(path))
+    src_bin = :erlang.list_to_binary(src)
+    path_bin = :erlang.list_to_binary(path)
+    ext = :filename.extension(src_bin)
+    case compile(ext, src_bin, path_bin) do
+      :ok ->
+        ExReloader.reload(module)
+      :error ->
+        Logger.error("Error while compiling #{inspect module}")
+    end
   end
 
-  defp compile(src, path) when is_binary(src) and is_binary(path) do
-    Kernel.ParallelCompiler.files_to_path([src], path)
+  defp compile(ext, src, path) when ext in [".ex", ".exs"]  do
+    result = Kernel.ParallelCompiler.files_to_path([src], path)
+    case result do
+      [] ->
+        :error
+      _  ->
+        :ok
+    end
+  end
+  defp compile(ext, src, path) when ext in [".erl", ".hrl"]  do
+    src_char_list = String.to_char_list(src)
+    path_char_list = String.to_char_list(path)
+    opts = [{:outdir, path_char_list},
+            :verbose,
+            :report_errors,
+            :report_warnings]
+    result = :compile.file(:filename.rootname(src_char_list), opts)
+    case result do
+      :error ->
+        :error
+      {:ok, _} ->
+        :ok
+    end
   end
 
   def source module do

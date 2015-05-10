@@ -28,7 +28,6 @@ defmodule ExReloader.Server do
       case File.stat(src) do
         {:ok, %File.Stat{mtime: mtime}} when mtime >= from and mtime < to ->
           ExReloader.recompile(module)
-          ExReloader.reload(module)
         {:ok, _} -> :unmodified
         {:error, :enoent} -> :gone
         other -> other
