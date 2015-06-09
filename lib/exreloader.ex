@@ -20,27 +20,28 @@ defmodule ExReloader do
 
   ##
 
-  def reload_modules(modules) do
+  def reload(modules) when is_list(modules) do
     for module <- modules, do: reload(module)
   end
-
   def reload(module) do
     :code.purge(module)
     :code.load_file(module)
     Logger.info "Reloaded #{inspect module}"
   end
 
-  def recompile module do
-    src = source(module)
+  def recompile(src, modules) do
+    module = List.first(modules)
     {:file, beam} = :code.is_loaded(module)
     path = :filename.dirname(beam)
-    Logger.info "Recompiling #{inspect module} in '#{src}'"
+
+    Logger.info "Recompiling #{inspect modules} in '#{src}'"
+
     src_bin = :erlang.list_to_binary(src)
     path_bin = :erlang.list_to_binary(path)
     ext = :filename.extension(src_bin)
     case compile(ext, src_bin, path_bin) do
       :ok ->
-        ExReloader.reload(module)
+        ExReloader.reload(modules)
       :error ->
         Logger.error("Error while compiling #{inspect module}")
     end
